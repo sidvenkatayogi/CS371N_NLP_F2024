@@ -32,7 +32,7 @@ class UnigramFeatureExtractor(FeatureExtractor):
     and any additional preprocessing you want to do.
     """
     def __init__(self, indexer: Indexer):
-        self.indexer = Indexer
+        self.indexer = indexer
 
     def extract_features(self, sentence: List[str], add_to_indexer: bool = False):
         features = Counter()
@@ -41,7 +41,7 @@ class UnigramFeatureExtractor(FeatureExtractor):
             idx = self.indexer.add_and_get_index(word, add_to_indexer)
 
             if idx != -1:
-                features[idx] = 1 # binary presence
+                features[idx] += 1 # frequency
 
         return features
 
@@ -93,12 +93,17 @@ class PerceptronClassifier(SentimentClassifier):
         self.feat_extractor = feat_extractor
     
     def predict(self, sentence: List[str]):
-        features = self.feat_extractor.extract_features(sentence, add_to_indexer=False)
-        y_pred = np.dot(self.weights, features) # dot product of weights and features
-        print(f"**y_pred was {y_pred}")
+        
+        f = self.feat_extractor.extract_features(sentence=sentence, add_to_indexer=False)
+        fx = np.zeros(len(self.weights))
+        for idx, value in f.items():
+            fx[idx] = value  # Populate the dense vector with feature values
+
+        y_pred = np.dot(self.weights.T, fx) # dot product of weights and features
+        # print(f"**y_pred was {y_pred}")
         if y_pred > 0:
             return 1
-        return -1
+        return 0
 
 class LogisticRegressionClassifier(SentimentClassifier):
     """
@@ -117,26 +122,42 @@ def train_perceptron(train_exs: List[SentimentExample], feat_extractor: FeatureE
     :param feat_extractor: feature extractor to use
     :return: trained PerceptronClassifier model
     """
-    a = 0.75
+    a = 1
+    # first pass adds words to indexer, sets vocab size for weights
+    for ex in train_exs:
+        feat_extractor.extract_features(sentence=ex.words, add_to_indexer=True)
     weights = np.zeros(len(feat_extractor.indexer))
+
     epochs = 10
 
     rng = np.random.default_rng(seed=42)
-    train_exs = rng.shuffle(train_exs)
+    rng.shuffle(train_exs)
+    # print(train_exs)
+
 
     for epoch in range(epochs):
         for ex in train_exs:
-            fxi = feat_extractor(sentence= ex.words, add_to_indexer= False)
-            y_pred = np.dot(weights, fxi)
+            fxi = list(feat_extractor.extract_features(sentence= ex.words, add_to_indexer= False).elements())
+
+            f = feat_extractor.extract_features(sentence=ex.words, add_to_indexer=False)
+            fxi = np.zeros(len(weights))  # Create a dense vector of the same length as weights
+            for idx, value in f.items():
+                fxi[idx] = value  # Populate the dense vector with feature values
+
+            # print(f"fxi: {fxi}, weights: {weights}")
+            y_pred = np.dot(weights.T, fxi)
+            # print(y_pred)
             if y_pred > 0:
                 y_pred = 1
             else: 
-                y_pred = -1
+                y_pred = 0
 
             if y_pred < ex.label: # y is + and y_pred is incorrectly -
                 weights += a*fxi
             elif y_pred > ex.label: # y is - and y_pred is incorrectly +
                 weights -= a*fxi
+
+    return PerceptronClassifier(weights, feat_extractor)
             
 
 
