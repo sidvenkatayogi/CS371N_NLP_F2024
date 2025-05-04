@@ -1,6 +1,6 @@
 # models.py
 import numpy as np
-
+import matplotlib.pyplot as plt
 from sentiment_data import *
 from utils import *
 
@@ -40,8 +40,7 @@ class UnigramFeatureExtractor(FeatureExtractor):
             word = word.lower()
             idx = self.indexer.add_and_get_index(word, add_to_indexer)
 
-            if idx != -1:
-                features[idx] += 1 # frequency
+            features[idx] += 1 # frequency
 
         return features
 
@@ -51,7 +50,9 @@ class BigramFeatureExtractor(FeatureExtractor):
     Bigram feature extractor analogous to the unigram one.
     """
     def __init__(self, indexer: Indexer):
-        raise Exception("Must be implemented")
+        self.indexer = indexer
+
+    
 
 
 class BetterFeatureExtractor(FeatureExtractor):
@@ -94,25 +95,15 @@ class PerceptronClassifier(SentimentClassifier):
     
     def predict(self, sentence: List[str]):
         
-        f = self.feat_extractor.extract_features(sentence=sentence, add_to_indexer=False)
-        fx = np.zeros(len(self.weights))
-        for idx, value in f.items():
-            fx[idx] = value  # Populate the dense vector with feature values
+        f = self.feat_extractor.extract_features(sentence=sentence, add_to_indexer=False).items()
+        dotp = 0
+        for idx, value in f:
+            dotp += (self.weights[idx]*value)
 
-        y_pred = np.dot(self.weights.T, fx) # dot product of weights and features
-        # print(f"**y_pred was {y_pred}")
+        y_pred = dotp
         if y_pred > 0:
             return 1
         return 0
-
-class LogisticRegressionClassifier(SentimentClassifier):
-    """
-    Implement this class -- you should at least have init() and implement the predict method from the SentimentClassifier
-    superclass. Hint: you'll probably need this class to wrap both the weight vector and featurizer -- feel free to
-    modify the constructor to pass these in.
-    """
-    def __init__(self):
-        raise Exception("Must be implemented")
 
 
 def train_perceptron(train_exs: List[SentimentExample], feat_extractor: FeatureExtractor) -> PerceptronClassifier:
@@ -122,7 +113,7 @@ def train_perceptron(train_exs: List[SentimentExample], feat_extractor: FeatureE
     :param feat_extractor: feature extractor to use
     :return: trained PerceptronClassifier model
     """
-    a = 1
+    
     # first pass adds words to indexer, sets vocab size for weights
     for ex in train_exs:
         feat_extractor.extract_features(sentence=ex.words, add_to_indexer=True)
@@ -131,47 +122,159 @@ def train_perceptron(train_exs: List[SentimentExample], feat_extractor: FeatureE
     epochs = 10
 
     rng = np.random.default_rng(seed=42)
+    # rng = np.random.default_rng()
     rng.shuffle(train_exs)
-    # print(train_exs)
 
+    a = 1
 
     for epoch in range(epochs):
+
+        # a = 1/(epoch+1)
+        a *= 0.75
+        rng.shuffle(train_exs)
         for ex in train_exs:
-            fxi = list(feat_extractor.extract_features(sentence= ex.words, add_to_indexer= False).elements())
+            # print(ex.label)
+            f = feat_extractor.extract_features(sentence=ex.words, add_to_indexer=False).items()
+            
+            dotp = 0
+            for idx, value in f:
+                dotp += (weights[idx]*value)
 
-            f = feat_extractor.extract_features(sentence=ex.words, add_to_indexer=False)
-            fxi = np.zeros(len(weights))  # Create a dense vector of the same length as weights
-            for idx, value in f.items():
-                fxi[idx] = value  # Populate the dense vector with feature values
-
-            # print(f"fxi: {fxi}, weights: {weights}")
-            y_pred = np.dot(weights.T, fxi)
-            # print(y_pred)
+            y_pred = dotp
             if y_pred > 0:
                 y_pred = 1
             else: 
                 y_pred = 0
 
-            if y_pred < ex.label: # y is + and y_pred is incorrectly -
-                weights += a*fxi
-            elif y_pred > ex.label: # y is - and y_pred is incorrectly +
-                weights -= a*fxi
+            if y_pred < ex.label: # y is 1 and y_pred is incorrectly 0
+                for idx, value in f:
+                    weights[idx] += a*value
+            elif y_pred > ex.label: # y is 0 and y_pred is incorrectly 1
+                for idx, value in f:
+                    weights[idx] -= a*value
 
     return PerceptronClassifier(weights, feat_extractor)
             
 
 
+class LogisticRegressionClassifier(SentimentClassifier):
+    """
+    Implement this class -- you should at least have init() and implement the predict method from the SentimentClassifier
+    superclass. Hint: you'll probably need this class to wrap both the weight vector and featurizer -- feel free to
+    modify the constructor to pass these in.
+    """
+    def __init__(self, weights: np.ndarray, feat_extractor: FeatureExtractor):
+        self.weights = weights
+        self.feat_extractor = feat_extractor
+    
+    def predict(self, sentence: List[str]):
+        
+        f = self.feat_extractor.extract_features(sentence=sentence, add_to_indexer=False).items()
+        dotp = 0
+        for idx, value in f:
+            dotp += (self.weights[idx]*value)
+
+        y_prob = 1 / (1 + np.exp(-dotp))
+        
+        if y_prob > 0.5:
+            return 1
+        return 0
 
 
-
-def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor: FeatureExtractor) -> LogisticRegressionClassifier:
+def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor: FeatureExtractor, dev_exs = None) -> LogisticRegressionClassifier:
     """
     Train a logistic regression model.
     :param train_exs: training set, List of SentimentExample objects
     :param feat_extractor: feature extractor to use
     :return: trained LogisticRegressionClassifier model
     """
-    raise Exception("Must be implemented")
+    # first pass adds words to indexer, sets vocab size for weights
+    for ex in train_exs:
+        feat_extractor.extract_features(sentence=ex.words, add_to_indexer=True)
+    weights = np.zeros(len(feat_extractor.indexer))
+
+    epochs = 5
+
+    rng = np.random.default_rng(seed=42)
+    # rng = np.random.default_rng()
+    rng.shuffle(train_exs)
+
+    a = 0.3
+    tda = []
+    dda = []
+
+    for epoch in range(epochs):
+        rng.shuffle(train_exs)
+        # a = 1/(epoch+1)
+        a *= 0.75
+        for ex in train_exs:
+            
+            f = feat_extractor.extract_features(sentence=ex.words, add_to_indexer=False).items()
+
+            dotp = 0
+            for idx, value in f:
+                dotp += (weights[idx]*value)
+
+            y_prob = 1 / (1 + np.exp(-dotp))
+
+            if ex.label == 1:
+                for idx, value in f:
+                    weights[idx] += a*value*(1 - y_prob)
+            elif ex.label == 0:
+                for idx, value in f:
+                    weights[idx] -= a*value*(y_prob)
+        if dev_exs:
+            nc = 0
+            tester = LogisticRegressionClassifier(weights, feat_extractor)
+            for ex in train_exs:
+                if tester.predict(ex.words) == ex.label:
+                    nc += 1
+            acc = nc / len(train_exs)
+            tda.append(acc)
+
+            nc = 0
+            for ex in dev_exs:
+                if tester.predict(ex.words) == ex.label:
+                    nc += 1
+            acc = nc / len(dev_exs)
+            dda.append(acc)
+            # acc = 0
+            # for ex in train_exs:
+            #     f = feat_extractor.extract_features(sentence=ex.words, add_to_indexer=False).items()
+            #     z = sum(weights[idx] * value for idx, value in f)               # shape (N,)
+            #     p = 1 / (1 + np.exp(-z))        # sigmoid
+
+            #     # numerical safety: clip p away from 0 or 1 before log
+            #     eps = 1e-12
+            #     p = np.clip(p, eps, 1 - eps)
+            #     y = ex.label
+            #     ll = np.sum(y * np.log(p) + (1 - y) * np.log(1 - p))
+            #     acc += ll
+            # tda.append(acc/len(train_exs))
+            # acc = 0
+            # for ex in dev_exs:
+            #     f = feat_extractor.extract_features(sentence=ex.words, add_to_indexer=False).items()
+            #     z = sum(weights[idx] * value for idx, value in f)               # shape (N,)
+            #     p = 1 / (1 + np.exp(-z))        # sigmoid
+
+                
+            #     y = ex.label
+            #     ll = np.sum(y * np.log(p) + (1 - y) * np.log(1 - p))
+            #     acc += ll
+                
+            # dda.append(acc/len(dev_exs))
+
+    plt.plot(range(len(tda)), tda, marker='o', label= "training")
+    plt.plot(range(len(dda)), dda, marker='o', label= "dev")
+    plt.title(f"Model accuracy vs. training iteration, with step = {a}")
+    plt.xlabel("Iteration")
+    plt.ylabel("Accuracy")
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
+
+    return LogisticRegressionClassifier(weights, feat_extractor)
 
 
 def train_model(args, train_exs: List[SentimentExample], dev_exs: List[SentimentExample]) -> SentimentClassifier:
@@ -204,8 +307,11 @@ def train_model(args, train_exs: List[SentimentExample], dev_exs: List[Sentiment
         model = TrivialSentimentClassifier()
     elif args.model == "PERCEPTRON":
         model = train_perceptron(train_exs, feat_extractor)
+    # elif args.model == "LR":
+    #     model = train_logistic_regression(train_exs, feat_extractor)
     elif args.model == "LR":
-        model = train_logistic_regression(train_exs, feat_extractor)
+        model = train_logistic_regression(train_exs, feat_extractor, dev_exs)
+
     else:
         raise Exception("Pass in TRIVIAL, PERCEPTRON, or LR to run the appropriate system")
     return model
