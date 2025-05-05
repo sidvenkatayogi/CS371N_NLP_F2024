@@ -1,6 +1,8 @@
 # models.py
 import numpy as np
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
+import nltk
+from nltk.corpus import stopwords
 from sentiment_data import *
 from utils import *
 
@@ -55,7 +57,7 @@ class BigramFeatureExtractor(FeatureExtractor):
     def extract_features(self, sentence: List[str], add_to_indexer: bool = False):
         features = Counter()
         for i in range(len(sentence)-1):
-            bigram = (sentence[i].lower(), sentence[i+1].lower())
+            bigram = (sentence[i].lower(), sentence[i+1].lower()) # no start or stop tokens
             idx = self.indexer.add_and_get_index(bigram, add_to_indexer)
             features[idx] += 1 # frequency
 
@@ -68,75 +70,43 @@ class BetterFeatureExtractor(FeatureExtractor):
     """
     Better feature extractor...try whatever you can think of!
     """
-
-
-    nsentences = 0
-    df = Counter()
+    # nltk.download('stopwords')
+    sw = set(stopwords.words('english'))
 
     def __init__(self, indexer: Indexer):
         self.indexer = indexer
-
-    # def extract_features(self, sentence: List[str], add_to_indexer: bool = False):
-    #     features = Counter()
-    #     for i in range(len(sentence)-1):
-    #         bigram = (sentence[i].lower(), sentence[i+1].lower())
-    #         idx = self.indexer.add_and_get_index(bigram, add_to_indexer)
-    #         features[idx] += 1 # frequency
-
-    #         word = sentence[i].lower()
-    #         idx = self.indexer.add_and_get_index(word, add_to_indexer)
-    #         features[idx] += 1 # frequency
-    #     word = sentence[-1].lower()
-    #     idx = self.indexer.add_and_get_index(word, add_to_indexer)
-    #     features[idx] += 1 # frequency
-
-    #     return features
-    def corpuscts(self, exs: List[SentimentExample]):
+        self.nsentences = 0
+        self.df = Counter() # how frequent words are present in all examples
+        
+    def corpuscts(self, exs: List[SentimentExample]): # computes df
         for ex in exs:
             self.nsentences += 1
             seen = set()
             for word in ex.words:
-                
-                idx = self.indexer.add_and_get_index(word.lower(), True)
-                if idx not in seen:
-                    self.df[idx] += 1
-                    seen.add(idx)
-                    
-                
-    # def extract_features(self, sentence: List[str], add_to_indexer: bool = False):
-    #     if add_to_indexer:
-    #         self.nsentences += 1
-    #     features = Counter()
-    #     seen = set()
-    #     for word in sentence:
-    #         word = word.lower()
-    #         idx = self.indexer.add_and_get_index(word, add_to_indexer)
-
-    #         features[idx] += 1 # frequency
-
-    #         tf = features[idx] / len(sentence)
-    #         if add_to_indexer and idx not in seen:
-    #             self.df[idx] += 1
-    #             seen.add(idx)
-    #         elif not add_to_indexer:
-    #             idf = np.log(self.nsentences / (self.df[idx] + 1))
-    #             features[idx] = tf * idf
-
-    #     return features
+                if word not in self.sw: # discard stopwords
+                    idx = self.indexer.add_and_get_index(word.lower(), True)
+                    if idx not in seen:
+                        self.df[idx] += 1 # first time seeing word in sentence, add it to df
+                        seen.add(idx)
 
     def extract_features(self, sentence: List[str], add_to_indexer: bool = False):
-        features = Counter()
+        # if adding to index, update df too
+        if add_to_indexer:  # this should normally be False though, and corpuscts should be called outside this method
+            self.corpuscts([sentence])
+        wfreq = Counter() # counts frequency of words in sentence
+        features = Counter() # tf-idf weighted features
+        L = len(sentence)
         for word in sentence:
-            word = word.lower()
-            idx = self.indexer.add_and_get_index(word, add_to_indexer)
+            if word not in self.sw: # discard stopwords
+                word = word.lower()
+                idx = self.indexer.add_and_get_index(word, False)
+                if idx >= 0: # discard unseen words when validating
+                    wfreq[idx] += 1 # frequency
+                    tf = wfreq[idx] / L
 
-            features[idx] += 1 # frequency
-
-            tf = features[idx] / len(sentence)
-
-            if not add_to_indexer:
-                idf = np.log(self.nsentences / (self.df[idx] + 1)) # add one in case word has never been seen before
-                features[idx] = tf * idf
+                    if not add_to_indexer:
+                        idf = np.log(self.nsentences / (self.df[idx] + 1)) # add one in case word has never been seen before
+                        features[idx] = tf * idf
 
         return features
 
@@ -206,19 +176,22 @@ def train_perceptron(train_exs: List[SentimentExample], feat_extractor: FeatureE
     a = 1
 
     for epoch in range(epochs):
+        rng.shuffle(train_exs)
 
         # a = 1/(epoch+1)
         a *= 0.75
-        rng.shuffle(train_exs)
+        
         for ex in train_exs:
-            # print(ex.label)
             f = feat_extractor.extract_features(sentence=ex.words, add_to_indexer=False).items()
             
             dotp = 0
             for idx, value in f:
-                dotp += (weights[idx]*value)
+                if idx >= 0: # should be >= 0, but just in case
+                    dotp += (weights[idx]*value)
 
             y_pred = dotp
+            print(y_pred)
+            
             if y_pred > 0:
                 y_pred = 1
             else: 
@@ -230,9 +203,9 @@ def train_perceptron(train_exs: List[SentimentExample], feat_extractor: FeatureE
             elif y_pred > ex.label: # y is 0 and y_pred is incorrectly 1
                 for idx, value in f:
                     weights[idx] -= a*value
+            # else y_pred is correct so no update
 
     return PerceptronClassifier(weights, feat_extractor)
-            
 
 
 class LogisticRegressionClassifier(SentimentClassifier):
@@ -250,7 +223,8 @@ class LogisticRegressionClassifier(SentimentClassifier):
         f = self.feat_extractor.extract_features(sentence=sentence, add_to_indexer=False).items()
         dotp = 0
         for idx, value in f:
-            dotp += (self.weights[idx]*value)
+            if idx >= 0: # unseen words discarded when validating
+                dotp += (self.weights[idx]*value)
 
         y_prob = 1 / (1 + np.exp(-dotp))
         
@@ -266,72 +240,80 @@ def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor:
     :param feat_extractor: feature extractor to use
     :return: trained LogisticRegressionClassifier model
     """
-    # first pass adds words to indexer, sets vocab size for weights
-    # if type(feat_extractor == BetterFeatureExtractor):
-    #     feat_extractor.corpuscts(train_exs)
-    # else:
-    #     for ex in train_exs:
-    #         feat_extractor.extract_features(sentence=ex.words, add_to_indexer=True)
-    feat_extractor.corpuscts(train_exs)
+
+    # first pass adds words to indexer, sets document counts, sets vocab size for weights
+    if isinstance(feat_extractor, BetterFeatureExtractor):
+        feat_extractor.corpuscts(train_exs)
+    else:
+        for ex in train_exs:
+            feat_extractor.extract_features(sentence=ex.words, add_to_indexer=True)
+            
+
     weights = np.zeros(len(feat_extractor.indexer))
 
-    epochs = 10
+    epochs = 3
 
-    rng = np.random.default_rng(seed=42)
-    # rng = np.random.default_rng()
+    # rng = np.random.default_rng(seed=42)
+    rng = np.random.default_rng()
     rng.shuffle(train_exs)
 
-    a = 0.05
-    tda = []
-    dda = []
+    a = 0.75
+
+    # # only used if plotting accuracies while training
+    # tda = []
+    # dda = []
 
     for epoch in range(epochs):
-        rng.shuffle(train_exs)
-        # a = 1/(epoch+1)
+        rng.shuffle(train_exs) # shuffling data every epoch
+
+        a = 1/(epoch+1)
         # a *= 0.75
+
         for ex in train_exs:
             
             f = feat_extractor.extract_features(sentence=ex.words, add_to_indexer=False).items()
 
             dotp = 0
             for idx, value in f:
-                dotp += (weights[idx]*value)
+                if idx >= 0: # should be > 0, but just in case
+                    dotp += (weights[idx]*value)
 
             y_prob = 1 / (1 + np.exp(-dotp))
 
             if ex.label == 1:
                 for idx, value in f:
-                    weights[idx] += a*value*(1 - y_prob)
+                    if idx >= 0:
+                        weights[idx] += a*value*(1 - y_prob) # -gradient = f(x) * (1-y_prob)
             elif ex.label == 0:
                 for idx, value in f:
-                    weights[idx] -= a*value*(y_prob)
-        if dev_exs:
-            nc = 0
-            tester = LogisticRegressionClassifier(weights, feat_extractor)
-            for ex in train_exs:
-                if tester.predict(ex.words) == ex.label:
-                    nc += 1
-            acc = nc / len(train_exs)
-            tda.append(acc)
+                    if idx >= 0:
+                        weights[idx] -= a*value*(y_prob) # -gradient = -f(x) * y_prob
+    #     if dev_exs:
+    #         nc = 0 # num correct
+    #         tester = LogisticRegressionClassifier(weights, feat_extractor)
+    #         for ex in train_exs:
+    #             if tester.predict(ex.words) == ex.label:
+    #                 nc += 1
+    #         acc = nc / len(train_exs)
+    #         tda.append(acc)
 
-            nc = 0
-            for ex in dev_exs:
-                if tester.predict(ex.words) == ex.label:
-                    nc += 1
-            acc = nc / len(dev_exs)
-            dda.append(acc)
+    #         nc = 0
+    #         for ex in dev_exs:
+    #             if tester.predict(ex.words) == ex.label:
+    #                 nc += 1
+    #         acc = nc / len(dev_exs)
+    #         dda.append(acc)
             
 
-    if dev_exs:
-        plt.plot(range(len(tda)), tda, marker='o', label= "training")
-        plt.plot(range(len(dda)), dda, marker='o', label= "dev")
-        plt.title(f"Model accuracy vs. training iteration, with step = {a}")
-        plt.xlabel("Iteration")
-        plt.ylabel("Accuracy")
-        plt.grid(True)
-        plt.legend()
-        plt.show()
-
+    # if dev_exs:
+    #     plt.plot(range(len(tda)), tda, marker='o', label= "training")
+    #     plt.plot(range(len(dda)), dda, marker='o', label= "dev")
+    #     plt.title(f"Model accuracy vs. training iteration, with step = {a}") # change {a} if step is dynamic
+    #     plt.xlabel("Iteration")
+    #     plt.ylabel("Accuracy")
+    #     plt.grid(True)
+    #     plt.legend()
+    #     plt.show()
 
     return LogisticRegressionClassifier(weights, feat_extractor)
 
@@ -368,8 +350,8 @@ def train_model(args, train_exs: List[SentimentExample], dev_exs: List[Sentiment
         model = train_perceptron(train_exs, feat_extractor)
     elif args.model == "LR":
         model = train_logistic_regression(train_exs, feat_extractor)
-    elif args.model == "LRplot":
-        model = train_logistic_regression(train_exs, feat_extractor, dev_exs)
+    # elif args.model == "LRplot":
+    #     model = train_logistic_regression(train_exs, feat_extractor, dev_exs)
 
     else:
         raise Exception("Pass in TRIVIAL, PERCEPTRON, or LR to run the appropriate system")
