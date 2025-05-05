@@ -96,36 +96,18 @@ class BetterFeatureExtractor(FeatureExtractor):
             self.nsentences += 1
             seen = set()
             for word in ex.words:
-                word.lower()
-                idx = self.indexer.add_and_get_index(word, True)
-                if word not in set():
+                
+                idx = self.indexer.add_and_get_index(word.lower(), True)
+                if idx not in seen:
                     self.df[idx] += 1
                     seen.add(idx)
                     
                 
-    def extract_features(self, sentence: List[str], add_to_indexer: bool = False):
-        if add_to_indexer:
-            self.nsentences += 1
-        features = Counter()
-        seen = set()
-        for word in sentence:
-            word = word.lower()
-            idx = self.indexer.add_and_get_index(word, add_to_indexer)
-
-            features[idx] += 1 # frequency
-
-            tf = features[idx] / len(sentence)
-            if add_to_indexer and idx not in seen:
-                self.df[idx] += 1
-                seen.add(idx)
-            else:
-                idf = np.log(self.nsentences / (self.df[idx] + 1))
-                features[idx] = tf * idf
-
-        return features
-
     # def extract_features(self, sentence: List[str], add_to_indexer: bool = False):
+    #     if add_to_indexer:
+    #         self.nsentences += 1
     #     features = Counter()
+    #     seen = set()
     #     for word in sentence:
     #         word = word.lower()
     #         idx = self.indexer.add_and_get_index(word, add_to_indexer)
@@ -133,12 +115,30 @@ class BetterFeatureExtractor(FeatureExtractor):
     #         features[idx] += 1 # frequency
 
     #         tf = features[idx] / len(sentence)
-
-    #         if not add_to_indexer:
-    #             idf = np.log(self.nsentences / (self.df[idx] + 1)) # add one in case word has never been seen before
+    #         if add_to_indexer and idx not in seen:
+    #             self.df[idx] += 1
+    #             seen.add(idx)
+    #         elif not add_to_indexer:
+    #             idf = np.log(self.nsentences / (self.df[idx] + 1))
     #             features[idx] = tf * idf
 
     #     return features
+
+    def extract_features(self, sentence: List[str], add_to_indexer: bool = False):
+        features = Counter()
+        for word in sentence:
+            word = word.lower()
+            idx = self.indexer.add_and_get_index(word, add_to_indexer)
+
+            features[idx] += 1 # frequency
+
+            tf = features[idx] / len(sentence)
+
+            if not add_to_indexer:
+                idf = np.log(self.nsentences / (self.df[idx] + 1)) # add one in case word has never been seen before
+                features[idx] = tf * idf
+
+        return features
 
 
 class SentimentClassifier(object):
@@ -270,14 +270,14 @@ def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor:
     # if type(feat_extractor == BetterFeatureExtractor):
     #     feat_extractor.corpuscts(train_exs)
     # else:
-    for ex in train_exs:
-        feat_extractor.extract_features(sentence=ex.words, add_to_indexer=True)
-
+    #     for ex in train_exs:
+    #         feat_extractor.extract_features(sentence=ex.words, add_to_indexer=True)
+    feat_extractor.corpuscts(train_exs)
     weights = np.zeros(len(feat_extractor.indexer))
 
     epochs = 10
 
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(seed=42)
     # rng = np.random.default_rng()
     rng.shuffle(train_exs)
 
@@ -320,31 +320,7 @@ def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor:
                     nc += 1
             acc = nc / len(dev_exs)
             dda.append(acc)
-            # acc = 0
-            # for ex in train_exs:
-            #     f = feat_extractor.extract_features(sentence=ex.words, add_to_indexer=False).items()
-            #     z = sum(weights[idx] * value for idx, value in f)               # shape (N,)
-            #     p = 1 / (1 + np.exp(-z))        # sigmoid
-
-            #     # numerical safety: clip p away from 0 or 1 before log
-            #     eps = 1e-12
-            #     p = np.clip(p, eps, 1 - eps)
-            #     y = ex.label
-            #     ll = np.sum(y * np.log(p) + (1 - y) * np.log(1 - p))
-            #     acc += ll
-            # tda.append(acc/len(train_exs))
-            # acc = 0
-            # for ex in dev_exs:
-            #     f = feat_extractor.extract_features(sentence=ex.words, add_to_indexer=False).items()
-            #     z = sum(weights[idx] * value for idx, value in f)               # shape (N,)
-            #     p = 1 / (1 + np.exp(-z))        # sigmoid
-
-                
-            #     y = ex.label
-            #     ll = np.sum(y * np.log(p) + (1 - y) * np.log(1 - p))
-            #     acc += ll
-                
-            # dda.append(acc/len(dev_exs))
+            
 
     if dev_exs:
         plt.plot(range(len(tda)), tda, marker='o', label= "training")

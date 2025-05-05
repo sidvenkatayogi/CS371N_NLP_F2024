@@ -448,7 +448,7 @@
 
 1	The director , Steven Shainberg , has succeeded by focusing intently on his characters , making them quirky individuals rather than figures of fun .
 
-0	The movie has a soft , percolating magic , a deadpan suspense .
+1	The movie has a soft , percolating magic , a deadpan suspense .
 
 1	A well-made and often lovely depiction of the mysteries of friendship .
 
@@ -586,7 +586,7 @@
 
 1	Attal mixes comedy with a serious exploration of ego and jealousy within a seemingly serene marriage .
 
-0	The diversity of the artists represented , both in terms of style and ethnicity , prevents the proceedings from feeling repetitious , as does the appropriately brief 40-minute running time .
+1	The diversity of the artists represented , both in terms of style and ethnicity , prevents the proceedings from feeling repetitious , as does the appropriately brief 40-minute running time .
 
 1	The Pianist is a fine valedictory work for Polanski , made richer by his own experiences , making his other movies somehow richer in the bargain .
 
@@ -2866,7 +2866,7 @@
 
 0	It will come as no surprise that the movie is n't scary .
 
-0	But here 's the real damn : It is n't funny , either .
+1	But here 's the real damn : It is n't funny , either .
 
 0	Quick : who wants to see a comedy about shoddy airport security ?
 
