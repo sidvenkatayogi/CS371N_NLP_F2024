@@ -52,6 +52,15 @@ class BigramFeatureExtractor(FeatureExtractor):
     def __init__(self, indexer: Indexer):
         self.indexer = indexer
 
+    def extract_features(self, sentence: List[str], add_to_indexer: bool = False):
+        features = Counter()
+        for i in range(len(sentence)-1):
+            bigram = (sentence[i].lower(), sentence[i+1].lower())
+            idx = self.indexer.add_and_get_index(bigram, add_to_indexer)
+            features[idx] += 1 # frequency
+
+        return features
+
     
 
 
@@ -59,8 +68,77 @@ class BetterFeatureExtractor(FeatureExtractor):
     """
     Better feature extractor...try whatever you can think of!
     """
+
+
+    nsentences = 0
+    df = Counter()
+
     def __init__(self, indexer: Indexer):
-        raise Exception("Must be implemented")
+        self.indexer = indexer
+
+    # def extract_features(self, sentence: List[str], add_to_indexer: bool = False):
+    #     features = Counter()
+    #     for i in range(len(sentence)-1):
+    #         bigram = (sentence[i].lower(), sentence[i+1].lower())
+    #         idx = self.indexer.add_and_get_index(bigram, add_to_indexer)
+    #         features[idx] += 1 # frequency
+
+    #         word = sentence[i].lower()
+    #         idx = self.indexer.add_and_get_index(word, add_to_indexer)
+    #         features[idx] += 1 # frequency
+    #     word = sentence[-1].lower()
+    #     idx = self.indexer.add_and_get_index(word, add_to_indexer)
+    #     features[idx] += 1 # frequency
+
+    #     return features
+    def corpuscts(self, exs: List[SentimentExample]):
+        for ex in exs:
+            self.nsentences += 1
+            seen = set()
+            for word in ex.words:
+                word.lower()
+                idx = self.indexer.add_and_get_index(word, True)
+                if word not in set():
+                    self.df[idx] += 1
+                    seen.add(idx)
+                    
+                
+    def extract_features(self, sentence: List[str], add_to_indexer: bool = False):
+        if add_to_indexer:
+            self.nsentences += 1
+        features = Counter()
+        seen = set()
+        for word in sentence:
+            word = word.lower()
+            idx = self.indexer.add_and_get_index(word, add_to_indexer)
+
+            features[idx] += 1 # frequency
+
+            tf = features[idx] / len(sentence)
+            if add_to_indexer and idx not in seen:
+                self.df[idx] += 1
+                seen.add(idx)
+            else:
+                idf = np.log(self.nsentences / (self.df[idx] + 1))
+                features[idx] = tf * idf
+
+        return features
+
+    # def extract_features(self, sentence: List[str], add_to_indexer: bool = False):
+    #     features = Counter()
+    #     for word in sentence:
+    #         word = word.lower()
+    #         idx = self.indexer.add_and_get_index(word, add_to_indexer)
+
+    #         features[idx] += 1 # frequency
+
+    #         tf = features[idx] / len(sentence)
+
+    #         if not add_to_indexer:
+    #             idf = np.log(self.nsentences / (self.df[idx] + 1)) # add one in case word has never been seen before
+    #             features[idx] = tf * idf
+
+    #     return features
 
 
 class SentimentClassifier(object):
@@ -189,24 +267,28 @@ def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor:
     :return: trained LogisticRegressionClassifier model
     """
     # first pass adds words to indexer, sets vocab size for weights
+    # if type(feat_extractor == BetterFeatureExtractor):
+    #     feat_extractor.corpuscts(train_exs)
+    # else:
     for ex in train_exs:
         feat_extractor.extract_features(sentence=ex.words, add_to_indexer=True)
+
     weights = np.zeros(len(feat_extractor.indexer))
 
-    epochs = 5
+    epochs = 10
 
-    rng = np.random.default_rng(seed=42)
+    rng = np.random.default_rng()
     # rng = np.random.default_rng()
     rng.shuffle(train_exs)
 
-    a = 0.3
+    a = 0.05
     tda = []
     dda = []
 
     for epoch in range(epochs):
         rng.shuffle(train_exs)
         # a = 1/(epoch+1)
-        a *= 0.75
+        # a *= 0.75
         for ex in train_exs:
             
             f = feat_extractor.extract_features(sentence=ex.words, add_to_indexer=False).items()
@@ -264,14 +346,15 @@ def train_logistic_regression(train_exs: List[SentimentExample], feat_extractor:
                 
             # dda.append(acc/len(dev_exs))
 
-    plt.plot(range(len(tda)), tda, marker='o', label= "training")
-    plt.plot(range(len(dda)), dda, marker='o', label= "dev")
-    plt.title(f"Model accuracy vs. training iteration, with step = {a}")
-    plt.xlabel("Iteration")
-    plt.ylabel("Accuracy")
-    plt.grid(True)
-    plt.legend()
-    plt.show()
+    if dev_exs:
+        plt.plot(range(len(tda)), tda, marker='o', label= "training")
+        plt.plot(range(len(dda)), dda, marker='o', label= "dev")
+        plt.title(f"Model accuracy vs. training iteration, with step = {a}")
+        plt.xlabel("Iteration")
+        plt.ylabel("Accuracy")
+        plt.grid(True)
+        plt.legend()
+        plt.show()
 
 
     return LogisticRegressionClassifier(weights, feat_extractor)
@@ -307,9 +390,9 @@ def train_model(args, train_exs: List[SentimentExample], dev_exs: List[Sentiment
         model = TrivialSentimentClassifier()
     elif args.model == "PERCEPTRON":
         model = train_perceptron(train_exs, feat_extractor)
-    # elif args.model == "LR":
-    #     model = train_logistic_regression(train_exs, feat_extractor)
     elif args.model == "LR":
+        model = train_logistic_regression(train_exs, feat_extractor)
+    elif args.model == "LRplot":
         model = train_logistic_regression(train_exs, feat_extractor, dev_exs)
 
     else:
