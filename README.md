@@ -1,2 +1,2 @@
 # Projects (and some notes) for Greg Durett's online [CS 388 NLP Course](https://www.cs.utexas.edu/~gdurrett/courses/online-course/materials.html)
-## /a1-distrib is the Movie Review Linear Sentiment Analysis Project
+## /a1-distrib is the Movie Review Linear Sentiment Classification Project
