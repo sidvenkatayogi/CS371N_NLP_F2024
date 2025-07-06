@@ -121,10 +121,11 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
 
             avg_embedding = torch.tensor(np.mean(embeddings, axis=0), dtype= torch.float32)
 
-            dan.zero_grad()
+
             gold_label = torch.zeros(2)
             gold_label[ex.label] = 1
 
+            dan.zero_grad()
             probs = dan.forward(avg_embedding)
 
             loss = torch.neg(torch.log(probs).dot(gold_label))
