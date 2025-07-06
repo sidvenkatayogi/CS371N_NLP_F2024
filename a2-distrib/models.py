@@ -52,9 +52,33 @@ class NeuralSentimentClassifier(SentimentClassifier):
     method and you can optionally override predict_all if you want to use batching at inference time (not necessary,
     but may make things faster!)
     """
-    def __init__(self):
-        raise NotImplementedError
+    def __init__(self, model, word_embeddings):
+        self.model = model
+        self.word_embeddings = word_embeddings
 
+    def predict(self, ex_words: List[str], has_typos: bool) -> int:
+        # Get embeddings and average them
+        word_embeddings_list = [self.word_embeddings.get_embedding(word) for word in ex_words]
+        avg_embedding = torch.tensor(np.mean(word_embeddings_list, axis=0), dtype= torch.float32)
+        
+        with torch.no_grad():
+            output = self.model(avg_embedding)
+            prediction = torch.argmax(output).item()
+        return prediction
+
+class DAN(nn.Module):
+        def __init__(self, input_size, hidden_size, out_size):
+            super(DAN, self).__init__()
+            # self.embedding_dim = embedding_dim
+            self.hidden_size = hidden_size
+
+            self.V = nn.Linear(input_size, hidden_size)
+            self.g = nn.Tanh() # or nn.ReLU()
+            self.W = nn.Linear(hidden_size, out_size)
+            self.softmax = nn.Softmax(dim=0)
+
+        def forward(self, x):
+            return self.softmax(self.W(self.g(self.V(x))))
 
 def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_exs: List[SentimentExample],
                                  word_embeddings: WordEmbeddings, train_model_for_typo_setting: bool) -> NeuralSentimentClassifier:
@@ -69,5 +93,46 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
     for the two settings.
     """
 
-    raise NotImplementedError
+    # 1. Define a subclass of nn.Module that does your prediction. This should return a log-probability
+    # distribution over class labels. Your module should take a list of word indices as input and embed them
+    # using a nn.Embedding layer initialized appropriately.
+    # 2. Compute your classification loss based on the prediction. In lecture, we saw using the negative log
+    # probability of the correct label as the loss. You can do this directly, or you can use a built-in loss
+    # function like NLLLoss or CrossEntropyLoss. Pay close attention to what these losses expect as
+    # inputs (probabilities, log probabilities, or raw scores).
+    # 3. Call network.zero grad() (zeroes out in-place gradient vectors), loss.backward (runs the
+    # backward pass to compute gradients), and optimizer.step to update your parameters.
+    
+    # hyperparameters
+    lr = 0.001
+    num_epochs = 50
 
+    inp = word_embeddings.get_embedding_length()
+    hid = 128
+    out = 2
+
+    dan = DAN(inp, hid, out)
+    optimizer = torch.optim.Adam(dan.parameters(), lr=lr)
+
+    for epoch in range(0, num_epochs):
+        total_loss = 0
+        for ex in train_exs:
+            embeddings = [word_embeddings.get_embedding(w) for w in ex.words]
+
+            avg_embedding = torch.tensor(np.mean(embeddings, axis=0), dtype= torch.float32)
+
+            dan.zero_grad()
+            gold_label = torch.zeros(2)
+            gold_label[ex.label] = 1
+
+            probs = dan.forward(avg_embedding)
+
+            loss = torch.neg(torch.log(probs).dot(gold_label))
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+
+        print(f"Epoch {epoch+1}, Loss: {total_loss/len(train_exs)}")
+
+    return NeuralSentimentClassifier(dan, word_embeddings)
