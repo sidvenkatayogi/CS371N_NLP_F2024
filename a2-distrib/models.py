@@ -83,11 +83,14 @@ class DAN(nn.Module):
             self.W = nn.Linear(hidden_size, out_size)
             self.softmax = nn.Softmax(dim=1)
 
-        def forward(self, word_idxs):
-            embeddings = self.emb_layer(word_idxs)
-            avg_emb = embeddings.mean(axis=1)
+        def forward(self, batch_word_idxs):
+            padded_word_idxs = torch.tensor(batch_word_idxs, dtype=torch.long)
+            embeddings = self.emb_layer(padded_word_idxs)
 
-            return self.softmax(self.W(self.g(self.V(avg_emb))))
+            batch_embs = embeddings.mean(axis=1)
+
+            # return self.softmax(self.W(self.g(self.V(batch_embs))))
+            return self.W(self.g(self.V(batch_embs)))
 
 def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_exs: List[SentimentExample],
                                  word_embeddings: WordEmbeddings, train_model_for_typo_setting: bool) -> NeuralSentimentClassifier:
@@ -113,8 +116,8 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
     # backward pass to compute gradients), and optimizer.step to update your parameters.
     
     # hyperparameters
-    lr = 0.001
-    num_epochs = 50
+    lr = 0.0005
+    num_epochs = 4
 
     inp = word_embeddings.get_embedding_length()
     hid = 128
@@ -123,36 +126,85 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
     
     out = 2
 
-    emb_layer = word_embeddings.get_initialized_embedding_layer(frozen=True)
+    emb_layer = word_embeddings.get_initialized_embedding_layer(frozen=False, padding_idx= 0)
 
     dan = DAN(emb_layer, hid, out)
     optimizer = torch.optim.Adam(dan.parameters(), lr=lr)
 
+    batch_size = 32
+    start = 0
+    end = 0
+    batches = []
+    for i in range(1, int(np.ceil(len(train_exs)/batch_size))):
+        start = (i-1) * batch_size
+        end = min(len(train_exs), i * batch_size)
+
+        batch = train_exs[start:end]
+        batches.append(batch)
+
+
+    loss_fn = nn.CrossEntropyLoss()
     classifier = None
     for epoch in range(0, num_epochs):
         total_loss = 0
-        for ex in train_exs:
-            word_idxs = []
-            for w in ex.words:
-                idx = word_embeddings.word_indexer.index_of(w)
-                if idx == -1:
-                    word_idxs.append(1)
-                else:
-                    word_idxs.append(idx)
-            word_idxs = torch.tensor(word_idxs).unsqueeze(0)
+        # for ex in train_exs:
+        #     word_idxs = []
+        #     for w in ex.words:
+        #         idx = word_embeddings.word_indexer.index_of(w)
+        #         if idx == -1:
+        #             word_idxs.append(1)
+        #         else:
+        #             word_idxs.append(idx)
+        #     word_idxs = torch.tensor(word_idxs).unsqueeze(0)
 
-            gold_label = torch.zeros(2)
-            gold_label[ex.label] = 1
+        #     gold_label = torch.zeros(2)
+        #     gold_label[ex.label] = 1
             
-            probs = dan(word_idxs)
-            loss = torch.neg(torch.log(probs.squeeze(0)).dot(gold_label))
+        #     probs = dan(word_idxs)
+        #     loss = torch.neg(torch.log(probs.squeeze(0)).dot(gold_label))
+            
+        #     dan.zero_grad()
+        #     loss.backward()
+        #     optimizer.step()
+
+        #     total_loss += loss.item()
+        np.random.shuffle(batches)
+        for batch in batches:
+            batch_word_idxs= []
+            # batch_labels = []
+
+            for ex in batch:
+                word_idxs = []
+                for w in ex.words:
+                    idx = word_embeddings.word_indexer.index_of(w)
+                    if idx == -1:
+                        word_idxs.append(1)
+                    else:
+                        word_idxs.append(idx)
+                # word_idxs = torch.tensor(word_idxs).unsqueeze(0)
+
+                # gold_label = torch.zeros(2)
+                # gold_label = [0,0]
+                # gold_label[ex.label] = 1
+
+                batch_word_idxs.append(word_idxs)
+                # batch_labels.append(gold_label)
+            m = np.max([len(x) for x in batch_word_idxs])
+
+            for i in range(len(batch_word_idxs)):
+                padding = m - len(batch_word_idxs[i])
+                batch_word_idxs[i] = batch_word_idxs[i] + list(np.zeros(padding))
+            # gold_labels_tensor = torch.tensor(batch_labels)
+            gold_labels_tensor = torch.tensor([ex.label for ex in batch], dtype=torch.long)
+            logits = dan(batch_word_idxs)
+            # loss = torch.neg(torch.sum(torch.log(probs) * gold_labels_tensor, dim=1)).mean()
+            loss = loss_fn(logits, gold_labels_tensor)
             
             dan.zero_grad()
             loss.backward()
             optimizer.step()
 
             total_loss += loss.item()
-        print(f"Epoch {epoch+1}, Loss: {total_loss/len(train_exs)}")
 
         classifier = NeuralSentimentClassifier(dan, word_embeddings)
         predictions = classifier.predict_all([ex.words for ex in dev_exs], has_typos=False)
