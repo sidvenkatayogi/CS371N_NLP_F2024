@@ -58,27 +58,28 @@ class NeuralSentimentClassifier(SentimentClassifier):
 
     def predict(self, ex_words: List[str], has_typos: bool) -> int:
         # Get embeddings and average them
-        word_embeddings_list = [self.word_embeddings.get_embedding(word) for word in ex_words]
-        avg_embedding = torch.tensor(np.mean(word_embeddings_list, axis=0), dtype= torch.float32)
-        
+        word_idxs = torch.tensor([self.word_embeddings.word_indexer.add_and_get_index(w) for w in ex_words])
+
         with torch.no_grad():
-            output = self.model(avg_embedding)
+            output = self.model(word_idxs)
             prediction = torch.argmax(output).item()
         return prediction
 
 class DAN(nn.Module):
-        def __init__(self, input_size, hidden_size, out_size):
+        def __init__(self, emb_layer, hidden_size, out_size):
             super(DAN, self).__init__()
-            # self.embedding_dim = embedding_dim
+            self.emb_layer = emb_layer
             self.hidden_size = hidden_size
-
-            self.V = nn.Linear(input_size, hidden_size)
+            self.V = nn.Linear(self.emb_layer.embedding_dim, hidden_size)
             self.g = nn.Tanh() # or nn.ReLU()
             self.W = nn.Linear(hidden_size, out_size)
             self.softmax = nn.Softmax(dim=0)
 
-        def forward(self, x):
-            return self.softmax(self.W(self.g(self.V(x))))
+        def forward(self, word_idxs):
+            embeddings = self.emb_layer(word_idxs)
+            avg_emb = embeddings.mean(dim=1)
+
+            return self.softmax(self.W(self.g(self.V(avg_emb))))
 
 def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_exs: List[SentimentExample],
                                  word_embeddings: WordEmbeddings, train_model_for_typo_setting: bool) -> NeuralSentimentClassifier:
@@ -105,30 +106,33 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
     
     # hyperparameters
     lr = 0.001
-    num_epochs = 50
+    num_epochs = 5
 
     inp = word_embeddings.get_embedding_length()
     hid = 128
+    if inp == 50:
+        hid = 32
+    
     out = 2
 
-    dan = DAN(inp, hid, out)
+    emb_layer = word_embeddings.get_initialized_embedding_layer(frozen=False, padding_idx=0)
+
+    dan = DAN(emb_layer, hid, out)
     optimizer = torch.optim.Adam(dan.parameters(), lr=lr)
 
     for epoch in range(0, num_epochs):
         total_loss = 0
         for ex in train_exs:
-            embeddings = [word_embeddings.get_embedding(w) for w in ex.words]
-
-            avg_embedding = torch.tensor(np.mean(embeddings, axis=0), dtype= torch.float32)
+            word_idxs = torch.tensor([word_embeddings.word_indexer.add_and_get_index(w) for w in ex.words])
 
 
             gold_label = torch.zeros(2)
             gold_label[ex.label] = 1
-
-            dan.zero_grad()
-            probs = dan.forward(avg_embedding)
-
+            
+            probs = dan(word_idxs)
             loss = torch.neg(torch.log(probs).dot(gold_label))
+            
+            dan.zero_grad()
             loss.backward()
             optimizer.step()
 
