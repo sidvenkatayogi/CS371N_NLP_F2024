@@ -58,7 +58,15 @@ class NeuralSentimentClassifier(SentimentClassifier):
 
     def predict(self, ex_words: List[str], has_typos: bool) -> int:
         # Get embeddings and average them
-        word_idxs = torch.tensor([self.word_embeddings.word_indexer.add_and_get_index(w) for w in ex_words])
+        # word_idxs = torch.tensor([self.word_embeddings.word_indexer.index_of(w) for w in ex_words])
+        word_idxs = []
+        for w in ex_words:
+            idx = self.word_embeddings.word_indexer.index_of(w)
+            if idx == -1:
+                word_idxs.append(1)
+            else:
+                word_idxs.append(idx)
+        word_idxs = torch.tensor(word_idxs).unsqueeze(0)
 
         with torch.no_grad():
             output = self.model(word_idxs)
@@ -73,11 +81,11 @@ class DAN(nn.Module):
             self.V = nn.Linear(self.emb_layer.embedding_dim, hidden_size)
             self.g = nn.Tanh() # or nn.ReLU()
             self.W = nn.Linear(hidden_size, out_size)
-            self.softmax = nn.Softmax(dim=0)
+            self.softmax = nn.Softmax(dim=1)
 
         def forward(self, word_idxs):
             embeddings = self.emb_layer(word_idxs)
-            avg_emb = embeddings.mean(dim=1)
+            avg_emb = embeddings.mean(axis=1)
 
             return self.softmax(self.W(self.g(self.V(avg_emb))))
 
@@ -106,7 +114,7 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
     
     # hyperparameters
     lr = 0.001
-    num_epochs = 5
+    num_epochs = 50
 
     inp = word_embeddings.get_embedding_length()
     hid = 128
@@ -115,29 +123,70 @@ def train_deep_averaging_network(args, train_exs: List[SentimentExample], dev_ex
     
     out = 2
 
-    emb_layer = word_embeddings.get_initialized_embedding_layer(frozen=False, padding_idx=0)
+    emb_layer = word_embeddings.get_initialized_embedding_layer(frozen=True)
 
     dan = DAN(emb_layer, hid, out)
     optimizer = torch.optim.Adam(dan.parameters(), lr=lr)
 
+    classifier = None
     for epoch in range(0, num_epochs):
         total_loss = 0
         for ex in train_exs:
-            word_idxs = torch.tensor([word_embeddings.word_indexer.add_and_get_index(w) for w in ex.words])
-
+            word_idxs = []
+            for w in ex.words:
+                idx = word_embeddings.word_indexer.index_of(w)
+                if idx == -1:
+                    word_idxs.append(1)
+                else:
+                    word_idxs.append(idx)
+            word_idxs = torch.tensor(word_idxs).unsqueeze(0)
 
             gold_label = torch.zeros(2)
             gold_label[ex.label] = 1
             
             probs = dan(word_idxs)
-            loss = torch.neg(torch.log(probs).dot(gold_label))
+            loss = torch.neg(torch.log(probs.squeeze(0)).dot(gold_label))
             
             dan.zero_grad()
             loss.backward()
             optimizer.step()
 
             total_loss += loss.item()
-
         print(f"Epoch {epoch+1}, Loss: {total_loss/len(train_exs)}")
+
+        classifier = NeuralSentimentClassifier(dan, word_embeddings)
+        predictions = classifier.predict_all([ex.words for ex in dev_exs], has_typos=False)
+
+        num_correct = 0
+        num_pos_correct = 0
+        num_pred = 0
+        num_gold = 0
+        num_total = 0
+        golds = [ex.label for ex in dev_exs]
+        if len(golds) != len(predictions):
+            raise Exception("Mismatched gold/pred lengths: %i / %i" % (len(golds), len(predictions)))
+        for idx in range(0, len(golds)):
+            gold = golds[idx]
+            prediction = predictions[idx]
+            if prediction == gold:
+                num_correct += 1
+            if prediction == 1:
+                num_pred += 1
+            if gold == 1:
+                num_gold += 1
+            if prediction == 1 and gold == 1:
+                num_pos_correct += 1
+            num_total += 1
+        acc = float(num_correct) / num_total
+        output_str = "Accuracy: %i / %i = %f" % (num_correct, num_total, acc)
+        prec = float(num_pos_correct) / num_pred if num_pred > 0 else 0.0
+        rec = float(num_pos_correct) / num_gold if num_gold > 0 else 0.0
+        f1 = 2 * prec * rec / (prec + rec) if prec > 0 and rec > 0 else 0.0
+        # output_str += ";\nPrecision (fraction of predicted positives that are correct): %i / %i = %f" % (num_pos_correct, num_pred, prec)
+        # output_str += ";\nRecall (fraction of true positives predicted correctly): %i / %i = %f" % (num_pos_correct, num_gold, rec)
+        # output_str += ";\nF1 (harmonic mean of precision and recall): %f;\n" % f1
+        # print(output_str)
+        print(f"Epoch {epoch+1}, Loss: {total_loss/len(train_exs)}, Accuracy: %i / %i = %f, F1 : %f" % (num_correct, num_total, acc, f1))
+
 
     return NeuralSentimentClassifier(dan, word_embeddings)
