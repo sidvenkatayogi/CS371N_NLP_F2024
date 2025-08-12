@@ -40,8 +40,9 @@ class Transformer(nn.Module):
         """
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, d_model)
-        self.layers = nn.ModuleList([TransformerLayer(d_model, d_internal) for _ in range(1)])
+        self.layers = nn.ModuleList([TransformerLayer(d_model, d_internal) for _ in range(2)])
         self.output_layer = nn.Linear(d_model, num_classes)
+        self.posenc = PositionalEncoding(d_model)
 
     def forward(self, indices):
         """
@@ -50,7 +51,7 @@ class Transformer(nn.Module):
         :return: A tuple of the softmax log probabilities (should be a 20x3 matrix) and a list of the attention
         maps you use in your layers (can be variable length, but each should be a 20x20 matrix)
         """
-        embeds = self.embedding(indices)
+        embeds = self.posenc(self.embedding(indices))
 
         attn_maps = []
         layer_output = embeds
@@ -82,7 +83,7 @@ class TransformerLayer(nn.Module):
         self.WV = nn.Linear(d_model, d_internal, bias=False)
         # self.WO = nn.Linear(d_internal, d_model, bias=False)
         self.softmax = nn.Softmax(dim=-1)
-        self.posenc = PositionalEncoding(d_model)
+        # self.posenc = PositionalEncoding(d_model)
 
         # FFN
         self.ffn = nn.Sequential(
@@ -93,8 +94,8 @@ class TransformerLayer(nn.Module):
         )
 
     def forward(self, input_vecs):
-        input_vecs = self.posenc(input_vecs)
-        
+        # input_vecs = self.posenc(input_vecs)
+
         Q = self.WQ(input_vecs)
         K = self.WK(input_vecs)
         V = self.WV(input_vecs)
@@ -160,7 +161,7 @@ def train_classifier(args, train, dev):
     lr = 1e-4
     num_epochs = 10
 
-    model = Transformer(vocab_size, d_model, d_internal, num_classes)
+    model = Transformer(vocab_size, d_model, d_internal, num_classes, num_layers)
     model.train()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     loss_fcn = nn.NLLLoss()
