@@ -29,7 +29,7 @@ class LetterCountingExample(object):
 # a single layer of the Transformer; this Module will take the raw words as input and do all of the steps necessary
 # to return distributions over the labels (0, 1, or 2).
 class Transformer(nn.Module):
-    def __init__(self, vocab_size, num_positions, d_model, d_internal, num_classes, num_layers):
+    def __init__(self, vocab_size, d_model, d_internal, num_classes):
         """
         :param vocab_size: vocabulary size of the embedding layer
         :param num_positions: max sequence length that will be fed to the model; should be 20
@@ -40,7 +40,7 @@ class Transformer(nn.Module):
         """
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, d_model)
-        self.layers = nn.ModuleList([TransformerLayer(d_model, d_internal) for _ in range(num_layers)])
+        self.layers = nn.ModuleList([TransformerLayer(d_model, d_internal) for _ in range(1)])
         self.output_layer = nn.Linear(d_model, num_classes)
 
     def forward(self, indices):
@@ -85,6 +85,7 @@ class TransformerLayer(nn.Module):
 
         # FFN
         self.ffn = nn.Sequential(
+            # nn.Linear(d_model, 4 * d_model), # expand
             nn.Linear(d_internal, 4 * d_model), # expand
             nn.ReLU(),
             nn.Linear(4 * d_model, d_model) # bring back to d_model
@@ -108,7 +109,6 @@ class TransformerLayer(nn.Module):
 
         return output, attn_map
         
-
 
 # Implementation of positional encoding that you can use in your network
 class PositionalEncoding(nn.Module):
@@ -157,7 +157,7 @@ def train_classifier(args, train, dev):
     lr = 1e-4
     num_epochs = 10
 
-    model = Transformer(vocab_size, num_positions, d_model, d_internal, num_classes, num_layers)
+    model = Transformer(vocab_size, d_model, d_internal, num_classes)
     model.train()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     loss_fcn = nn.NLLLoss()
@@ -185,7 +185,6 @@ def train_classifier(args, train, dev):
         print(f"Epoch {t+1} loss: {loss_this_epoch/len(train)}")
         model.eval()
         decode(model, dev)
-        model.train()
 
     model.eval()
     return model
