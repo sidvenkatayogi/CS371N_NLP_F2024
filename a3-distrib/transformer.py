@@ -82,6 +82,7 @@ class TransformerLayer(nn.Module):
         self.WV = nn.Linear(d_model, d_internal, bias=False)
         # self.WO = nn.Linear(d_internal, d_model, bias=False)
         self.softmax = nn.Softmax(dim=-1)
+        self.posenc = PositionalEncoding(d_model)
 
         # FFN
         self.ffn = nn.Sequential(
@@ -92,6 +93,8 @@ class TransformerLayer(nn.Module):
         )
 
     def forward(self, input_vecs):
+        input_vecs = self.posenc(input_vecs)
+        
         Q = self.WQ(input_vecs)
         K = self.WK(input_vecs)
         V = self.WV(input_vecs)
