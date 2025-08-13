@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 from torch import optim
 import random
+from transformer import PositionalEncoding
+from datetime import datetime
 
 class LanguageModel(object):
 
@@ -48,37 +50,40 @@ class UniformLanguageModel(LanguageModel):
 
 
 class NeuralLanguageModel(nn.Module):
-    def __init__(self, vocab_index, vocab_size, d_model, num_layers, num_classes):
+    def __init__(self, vocab_index, vocab_size, d_model, num_layers, num_classes, chunk_len):
         super(NeuralLanguageModel, self).__init__()
         self.vocab_index = vocab_index
         self.vocab_size = vocab_size
+        self.chunk_len = chunk_len
         self.embedding = nn.Embedding(vocab_size, d_model)
+        self.posenc = PositionalEncoding(d_model, chunk_len + 1)
         enc_layer = nn.TransformerEncoderLayer(d_model= d_model, nhead= 4, batch_first=True)
         self.transformer = nn.TransformerEncoder(enc_layer, num_layers= num_layers)
         self.output_layer = nn.Linear(d_model, num_classes)
 
     def forward(self, input_tensor):
         mask = nn.Transformer.generate_square_subsequent_mask(input_tensor.shape[1])
-        embedded = self.embedding(input_tensor)
+        embedded = self.posenc(self.embedding(input_tensor))
         output = self.transformer(embedded, mask=mask)
         output = self.output_layer(output)
         return nn.functional.log_softmax(output, dim=2)
 
     def get_next_char_log_probs(self, context):
         self.eval()
-        if not context:
-            return np.ones([self.vocab_size]) * np.log(1.0/self.vocab_size)
-        context_indices = [self.vocab_index.index_of(c) for c in context]
-        context_tensor = torch.tensor([context_indices])
-        log_probs = self.forward(context_tensor)
-        return log_probs[0, -1, :].detach().numpy()
+        with torch.no_grad():
+            context = ' ' + context
+            context_indices = [self.vocab_index.index_of(c) for c in context[-self.chunk_len:]]
+            context_tensor = torch.tensor([context_indices], dtype= torch.long)
+            log_probs = self.forward(context_tensor)
+            return log_probs[0, -1, :].detach().numpy()
 
     def get_log_prob_sequence(self, next_chars, context):
         self.eval()
+        log_probs = 0.0
         for i, char in enumerate(next_chars):
             current_context = context + next_chars[:i]
-            log_prob += self.get_next_char_log_probs(current_context)[self.vocab_index.index_of(char)]
-        return log_prob
+            log_probs += self.get_next_char_log_probs(current_context[-self.chunk_len:])[self.vocab_index.index_of(char)]
+        return log_probs
 
 def train_lm(args, train_text, dev_text, vocab_index):
     """
@@ -88,29 +93,29 @@ def train_lm(args, train_text, dev_text, vocab_index):
     :param vocab_index: an Indexer of the character vocabulary (27 characters)
     :return: a NeuralLanguageModel instance trained on the given data
     """
-
+    s = datetime.now()
     # Hyperparameters
     d_model = 128
     vocab_size = len(vocab_index)
     num_classes = vocab_size
-    num_layers = 1
-    lr = 1e-4
+    num_layers = 2
+    lr = 5e-4
     num_epochs = 10
-    chunk = 32
+    chunk_len = 16
     batch_size = 256
 
-    model = NeuralLanguageModel(vocab_index, vocab_size, d_model, num_layers, num_classes)
+    model = NeuralLanguageModel(vocab_index, vocab_size, d_model, num_layers, num_classes, chunk_len)
     model.train()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     loss_fcn = nn.NLLLoss()
-
     
     train_examples = []
-    for i in range(0, len(train_text) - chunk):
-        train_examples.append([vocab_index.index_of(c) for c in train_text[i:i+chunk+1]])
+    for i in range(0, len(train_text) - chunk_len):
+        train_examples.append([vocab_index.index_of(c) for c in train_text[i:i+chunk_len+1]])
 
     for t in range(num_epochs):
         model.train()
+        es = datetime.now()
         epoch_loss = 0.0
 
         random.seed(t)
@@ -119,10 +124,8 @@ def train_lm(args, train_text, dev_text, vocab_index):
         for i in range(0, len(train_examples), batch_size):
             batch_examples = train_examples[i:i+batch_size]
             
-            inputs = torch.tensor([ex[:-1] for ex in batch_examples])
-            targets = torch.tensor([ex[1:] for ex in batch_examples])
-
-            print(inputs)
+            inputs = torch.tensor([[vocab_index.index_of(' ')] + ex[:-1] for ex in batch_examples], dtype= torch.long)
+            targets = torch.tensor([ex[:] for ex in batch_examples], dtype= torch.long)
 
             optimizer.zero_grad()
 
@@ -135,6 +138,11 @@ def train_lm(args, train_text, dev_text, vocab_index):
         
             epoch_loss += loss.item() * len(batch_examples)
 
-        print(f"Epoch {t+1} loss: {epoch_loss/len(train_examples)}")
+        ee = datetime.now()
+        print(f"Epoch {t+1} loss: {epoch_loss/len(train_examples)}, time: {ee-es}")
+        
         model.eval()
+    e = datetime.now()
+
+    print(f"Training time: {e-s}")
     return model

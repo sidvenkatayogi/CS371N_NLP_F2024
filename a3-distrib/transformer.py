@@ -168,8 +168,8 @@ def train_classifier(args, train, dev):
 
     for t in range(num_epochs):
         loss_this_epoch = 0.0
-        random.seed(t)
         ex_idxs = list(range(len(train)))
+        random.seed(t)
         random.shuffle(ex_idxs)
 
         for ex_idx in ex_idxs:
