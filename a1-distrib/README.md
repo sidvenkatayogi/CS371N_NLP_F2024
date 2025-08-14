@@ -1,4 +1,4 @@
-# Linear Sentiment Classification
+# Sentiment Classification
 ## Determining the sentiment/rating of movie reviews! Using Perceptron and Logistic Regression
 
 ## My code is within models.py
